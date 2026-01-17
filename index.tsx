@@ -20,7 +20,8 @@ import {
   AlertCircle,
   Key,
   Settings,
-  MonitorPlay
+  MonitorPlay,
+  RefreshCcw
 } from 'lucide-react';
 
 // --- Type Definitions for AI Studio Window Helpers ---
@@ -33,6 +34,19 @@ declare global {
     aistudio?: AIStudio;
   }
 }
+
+// --- Helper for Error Detection ---
+const isAuthOrQuotaError = (error: any) => {
+  const errStr = JSON.stringify(error).toLowerCase();
+  const msg = error?.message?.toLowerCase() || "";
+  return errStr.includes("resource_exhausted") || 
+         errStr.includes("429") || 
+         errStr.includes("permission_denied") || 
+         errStr.includes("403") ||
+         errStr.includes("requested entity was not found") ||
+         msg.includes("quota") ||
+         msg.includes("limit");
+};
 
 // --- Components ---
 
@@ -53,7 +67,7 @@ const Header = ({ onSwitchKey }: { onSwitchKey: () => void }) => (
         <button 
           onClick={onSwitchKey}
           className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 hover:border-orange-500/50 hover:bg-orange-500/5 text-xs font-semibold text-slate-300 transition-all active:scale-95"
-          title="Change API Key (use this if you hit quota limits or permission denied)"
+          title="Change API Key"
         >
           <Key className="w-3.5 h-3.5 text-orange-400" />
           Switch Key
@@ -84,6 +98,7 @@ const CodeBlock = ({ code, language = 'java' }: { code: string, language?: strin
 function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [blueprint, setBlueprint] = useState<any>(null);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [thumbnailLoading, setThumbnailLoading] = useState(false);
@@ -104,6 +119,7 @@ function App() {
   const generateBlueprint = async () => {
     if (!input.trim()) return;
     setLoading(true);
+    setErrorMsg(null);
     setVideoUrl(null);
     setThumbnail(null);
     try {
@@ -172,8 +188,14 @@ function App() {
 
       const data = JSON.parse(response.text || '{}');
       setBlueprint(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Blueprint generation failed:", error);
+      if (isAuthOrQuotaError(error)) {
+        setErrorMsg("Quota Exceeded or Access Denied. Please switch to a paid API key using the button at the top.");
+        await window.aistudio?.openSelectKey();
+      } else {
+        setErrorMsg("Studio failed to initialize. Please check your input and try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -212,8 +234,7 @@ function App() {
       }
     } catch (error: any) {
       console.error("Thumbnail generation failed:", error);
-      const errStr = JSON.stringify(error);
-      if (errStr.includes("Requested entity was not found") || errStr.includes("PERMISSION_DENIED") || errStr.includes("403")) {
+      if (isAuthOrQuotaError(error)) {
         await window.aistudio?.openSelectKey();
       }
     } finally {
@@ -262,8 +283,7 @@ function App() {
       }
     } catch (error: any) {
       console.error("Video generation failed:", error);
-      const errStr = JSON.stringify(error);
-      if (errStr.includes("Requested entity was not found") || errStr.includes("PERMISSION_DENIED") || errStr.includes("403")) {
+      if (isAuthOrQuotaError(error)) {
         setVideoStatus("Access Denied or Quota Exceeded. Please select a valid paid API key.");
         await window.aistudio?.openSelectKey();
       } else {
@@ -296,6 +316,19 @@ function App() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
             />
+            {errorMsg && (
+              <div className="mb-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3 text-red-400 text-sm animate-in fade-in zoom-in duration-300">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="flex-1">{errorMsg}</p>
+                <button 
+                  onClick={generateBlueprint}
+                  className="p-1 hover:bg-red-500/20 rounded-lg transition-colors"
+                  title="Retry"
+                >
+                  <RefreshCcw className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-4 justify-between items-center">
               <div className="flex gap-2 text-[10px] text-slate-500 font-bold tracking-widest uppercase">
                 <span className="px-2 py-1 bg-slate-800 rounded border border-white/5">Architecture</span>
@@ -505,7 +538,7 @@ function App() {
                 <div>
                   <h4 className="text-xs font-bold text-blue-400 mb-1 uppercase tracking-wider">Quota Management</h4>
                   <p className="text-[10px] text-slate-500 leading-normal">
-                    If you hit quota limits or 403 errors, use the <strong>Switch Key</strong> button to select a project with active billing for video generation.
+                    If you hit quota limits or 429/403 errors, use the <strong>Switch Key</strong> button to select a project with active billing.
                   </p>
                 </div>
               </div>
